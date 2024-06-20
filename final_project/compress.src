@@ -1,0 +1,280 @@
+#include <iostream>
+#include <string>
+#include <vector>
+#include <numeric>
+#include <cmath>
+#include <algorithm>
+#include <bitset>
+#include <fstream>
+#include <sstream>
+
+using namespace std;
+
+int rescale_type(long l, long u, long R) {
+    if ((u < R/2) or (l >= R/2)) return 1;
+    else if ((l >= R/4) and (u < (R*3)/4)) return 2;
+    return 0;
+}
+
+std::string intToBinaryString(long n) {
+    std::string result;
+    while (n > 0) {
+        // Append the least significant bit of n to the result string
+        result = (n % 2 == 0 ? "0" : "1") + result;
+        // Right shift n by 1 bit
+        n >>= 1;
+    }
+    // If the result string is empty, the input was 0
+    if (result.empty()) {
+        result = "0";
+    }
+    return result;
+}
+
+
+string IntegerArithmeticCode(const string &mensaje, const vector<char> &alfabeto, const vector<int> &frecuencias) {
+    string code = "";
+
+    long T = accumulate(frecuencias.begin(), frecuencias.end(), 0);
+    long k = (log2(4*T) + 1);
+    long R = pow(2,k);
+
+    long MSB_remove_mask = R - 1;
+    long MSB_complement_mask = static_cast<int> (R / 2);
+
+
+    long l = 0;
+    long u = R - 1;
+    long e3_count = 0;
+
+    for (char c : mensaje) {
+        auto it = find(alfabeto.begin(), alfabeto.end(), c);
+        int i = distance(alfabeto.begin(), it);
+
+        long nl = l + static_cast<int>( (long) (u-l+1) * (accumulate(frecuencias.begin(), frecuencias.begin() + i, 0) / (double) T));
+        long nu = l + static_cast<int>( (long) (u-l+1) * (accumulate(frecuencias.begin(), frecuencias.begin() + i + 1 , 0) / (double)T)) - 1;
+        l = nl;
+        u = nu;
+        long r;
+
+        while (r = rescale_type(l, u, R)) {
+            if (r == 1) {
+                int b = (l >= R/2);
+                code += to_string(b) + string(e3_count, '1' - b);
+
+                l = (l << 1) & MSB_remove_mask;
+                u = ((u << 1) & MSB_remove_mask) + 1;
+                e3_count = 0;
+            } else {
+                l = (l << 1) ^ MSB_complement_mask;
+                u = (((u << 1) & MSB_remove_mask) ^ MSB_complement_mask) + 1;
+                e3_count++;
+            }
+        }
+    }
+    if (l <= R/4) code += "01" + string(e3_count, '1');
+    else code += "10" + string(e3_count, '0');
+    string binary = intToBinaryString(l);
+    code += string(k-binary.length(), '0') + binary;
+
+    return code;
+}
+
+vector<int> freq(string texto) {
+    vector<int> freqs = {0,0,0,0};
+
+    for (char c: texto) {
+        if (c == 'A') freqs[0]++;
+        else if (c == 'C') freqs[1]++;
+        else if (c == 'G') freqs[2]++;
+        else freqs[3]++;
+    }
+
+    return freqs;
+}
+
+
+
+std::string intTo32BitBinaryString(uint32_t value) {
+    std::bitset<32> binarySet(value);
+    return binarySet.to_string();
+}
+
+
+void write_to_file(const string &binarySequence, const string &filename) {
+    std::ofstream outFile(filename + ".cps", std::ios::binary);
+
+    if (outFile.is_open()) {
+        for (size_t i = 0; i < binarySequence.length(); i += 8) {
+            char byte = 0;
+            for (size_t j = 0; j < 8 && (i + j) < binarySequence.length(); ++j) {
+                if (binarySequence[i + j] == '1') {
+                    byte |= 1 << (7 - j);
+                }
+            }
+            outFile.write(&byte, 1);
+        }
+        outFile.close();
+    } else {
+        cerr << "Unable to open file for writing." << endl;
+    }
+}
+
+
+
+vector<int> accumulated(const vector<int> &frecuencias) {
+    vector<int> acum;
+    int sum = 0;
+    for (int f: frecuencias) {
+        acum.push_back(sum);
+        sum += f;
+    }
+    acum.push_back(sum);
+    return acum;
+}
+
+int search_interval(const vector<int> &acum, int num) {
+    for (int i = 0; i < acum.size(); ++i) {
+        if (acum[i] > num) return i - 1;
+    }   
+    return -1;
+}
+
+string IntegerArithmeticDecode(const string& codigo, int longitud_mensaje, const vector<char> &alfabeto, const vector<int> &frecuencias) {
+    string mensaje = "";
+
+    long T = accumulate(frecuencias.begin(), frecuencias.end(), 0);
+    long k = (log2(4*T) + 1);
+    long R = pow(2,k);
+    long t = stoi(codigo.substr(0,k), nullptr, 2);
+
+    long MSB_remove_mask = R - 1;
+    long MSB_complement_mask = static_cast<int> (R / 2);
+
+    vector<int> acum = accumulated(frecuencias);
+
+    long l = 0;
+    long u = R - 1;
+
+    size_t codigo_index = k;
+
+    while (mensaje.length() < longitud_mensaje) {
+        long n = (((long)(t-l+1) * T - 1) / (long)(u-l+1));
+        long i = search_interval(acum,n);
+        mensaje += alfabeto[i];
+
+        long nl = l + static_cast<long>( (u-l+1) * (accumulate(frecuencias.begin(), frecuencias.begin() + i, 0) / (double) T));
+        long nu = l + static_cast<long>( (u-l+1) * (accumulate(frecuencias.begin(), frecuencias.begin() + i + 1, 0) / (double) T)) - 1;
+
+        l = nl;
+        u = nu;
+        long r;
+        while (r = rescale_type(l, u, R)) {
+            if (r == 1) {
+                l = (l << 1) & MSB_remove_mask;
+                u = ((u << 1) & MSB_remove_mask) + 1;
+                t = ((t << 1) & MSB_remove_mask) + (codigo[k] - '0');
+                k++;
+            } else {
+                l = ((l << 1) & MSB_remove_mask) ^ MSB_complement_mask;
+                u = (((u << 1) & MSB_remove_mask) ^ MSB_complement_mask) + 1;
+                t = (((t << 1) & MSB_remove_mask) ^ MSB_complement_mask) + (codigo[k] - '0');
+                k++;
+            }
+        }
+
+    }
+
+    return mensaje;
+}
+
+uint32_t binaryStringToInt32(const std::string& binaryString) {
+    // Check if the binary string has exactly 64 bits
+    if (binaryString.length() != 32) {
+        throw std::invalid_argument("Binary string must have exactly 64 bits.");
+    }
+    
+    // Convert the binary string to a 64-bit unsigned integer using bitset
+    std::bitset<32> binarySet(binaryString);
+    return static_cast<uint32_t>(binarySet.to_ulong());
+}
+
+void write_to_file_decompress(string dna) {
+    std::ofstream out("decompressed.out");
+    out << dna;
+    out.close();
+}
+
+
+int main(int argc, char* argv[]) {
+    string command = argv[1];
+    string filename = argv[2];
+    if (command == "-c") {
+        std::ifstream ifs(filename);
+        std::string content( (std::istreambuf_iterator<char>(ifs) ),
+                        (std::istreambuf_iterator<char>()    ) );
+        
+        const vector<char> alfabeto = {'A', 'C', 'G', 'T'};
+        const vector<int> f = freq(content);
+
+        string C = IntegerArithmeticCode(content, alfabeto, f);
+
+        string length = intTo32BitBinaryString(content.length());
+        string fA = intTo32BitBinaryString(f[0]);
+        string fC = intTo32BitBinaryString(f[1]);
+        string fG = intTo32BitBinaryString(f[2]);
+        string fT = intTo32BitBinaryString(f[3]);
+
+        string final = length + fA + fC + fG + fT + C;
+        write_to_file(final,filename);
+        cout << "Ratio: " << content.length()*8/(double)final.length() << endl;
+        return 0;
+    } else if (command == "-d") {
+        std::ifstream file(filename, std::ios::binary);
+
+        if (!file) {
+            throw std::runtime_error("Failed to open file: " + filename);
+        }
+
+        ostringstream buffer;
+        buffer << file.rdbuf();
+        std::string fileContents = buffer.str();
+
+        std::ostringstream binaryStringStream;
+        for (unsigned char byte : fileContents) {
+            binaryStringStream << std::bitset<8>(byte);
+        }
+
+        string bb = binaryStringStream.str();
+
+
+        string v = "";
+        v = bb.substr(0,32);
+        int length = binaryStringToInt32(v);
+
+        v = bb.substr(32,32);
+
+        int fA = binaryStringToInt32(v);
+
+        v = bb.substr(64,32);
+
+        int fC = binaryStringToInt32(v);
+
+        v = bb.substr(96,32);
+
+        int fG = binaryStringToInt32(v);
+
+        v = bb.substr(128,32);
+
+        int fT = binaryStringToInt32(v);
+        
+        v = bb.substr(160);
+
+        const vector<char> alfabeto = {'A', 'C', 'G', 'T'};
+        const vector<int> f = {fA, fC, fG, fT};
+
+        string C = IntegerArithmeticDecode(v, length, alfabeto, f);
+
+         write_to_file_decompress(C);
+    }
+}
